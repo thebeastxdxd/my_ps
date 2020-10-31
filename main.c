@@ -153,13 +153,13 @@ bool is_pid(char* proc_ent_name) {
 void print_pid(void* info) {
 
     pid_info* i = (pid_info*)info;
-    printf("%d %d %d %d %s\n", i->euid, i->pid, i->ppid, i->gid, i->cmdline);
+    printf("%-10d %-10d %-10d %-10d %s\n", i->euid, i->pid, i->ppid, i->gid, i->cmdline);
 
 }
 
 void print_pids(struct Node** pids) {
 
-    printf("EUID PID PPID GID CMD\n");
+    printf("%-10s %-10s %-10s %-10s %-10s\n", "EUID", "PID", "PPID", "GID", "CMD");
     list_print(pids, print_pid);
 }
 
