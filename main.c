@@ -2,11 +2,13 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
 #include <string.h>
 #include <dirent.h>
+#include "linked_list.h"
 
 #define MIN_BUF_SIZE 256
 #define MID_BUF_SIZE 4096
@@ -136,26 +138,38 @@ pid_info* parse_pid(char* pid) {
         printf("something went wrong\n");
     }
     
-    printf("pid: %d, cmd: %s, ppid: %d, gid: %d, real_uid: %d, effective_uid: %d\n", info->pid, info->cmdline, info->ppid, info->gid, info->ruid, info->euid);
+
     free(cmdline_path);
     free(status_path);
     free(stat_path);
     return info;
 }
 
+bool is_pid(char* proc_ent_name) {
+
+    return (atoi(proc_ent_name) != 0);
+}
+
+void print_pid(void* info) {
+
+    pid_info* i = (pid_info*)info;
+    printf("%d %d %d %d %s\n", i->euid, i->pid, i->ppid, i->gid, i->cmdline);
+
+}
+
+void print_pids(struct Node** pids) {
+
+    printf("EUID PID PPID GID CMD\n");
+    list_print(pids, print_pid);
+}
 
 int main() {
     
-    struct dirent* proc_ent;
-    DIR* proc_dir;
+    struct dirent* proc_ent = NULL;
+    DIR* proc_dir = NULL;
+    pid_info* info = NULL;
+    struct Node** pid_list = list_init(NULL);
 
-    char* full_path = NULL;
-    long file_sz = -1;
-
-    char* error_str = malloc(MID_BUF_SIZE);
-    char* buf = NULL;
-    int tmp_fd = -1;
-   
     proc_dir = opendir(PROC_PATH);
     if (proc_dir == NULL) {
         printf("Cannot open /proc\n");
@@ -164,13 +178,13 @@ int main() {
     
     proc_ent = readdir(proc_dir);
     while (proc_ent != NULL) {
-       if (atoi(proc_ent->d_name) != 0) {
-            parse_pid(proc_ent->d_name);
+       if (is_pid(proc_ent->d_name)) {
+            info = parse_pid(proc_ent->d_name);
+            list_push(pid_list, (void*)info);
         }
 
         proc_ent = readdir(proc_dir);
-                
     }
-
-    free(error_str);
+    print_pids(pid_list);
+    list_free(pid_list);
 }
