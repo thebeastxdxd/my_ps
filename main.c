@@ -1,36 +1,44 @@
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <unistd.h>
 #include <stdio.h>
-#include <errno.h>
 #include <string.h>
 #include <dirent.h>
 #include "linked_list.h"
 
+// find path max len
 #define MIN_BUF_SIZE 256
 #define MID_BUF_SIZE 4096
 #define STAT     "stat"
 #define STATUS   "status"
 #define CMDLINE  "cmdline"
 #define UID_SUBS "Uid:"
+// note really necessary
 #define READ_FLAG "r"
+#define IS_PID(proc_ent_name) (atoi(proc_ent_name) != 0)
+
+// stuff left to do
+// 1. remove malloc situtation 
+// 2. fix join_proc_path
+// 3. fix error code situtation
+// 4. check return value of each function
+// 5. remove linked list from solution?
+// 6. fix spagehtti code with name and cmdline
 
 const char* PROC_PATH = "/proc";
 
-typedef struct _pid_info {
+typedef struct {
     int ruid;
     int euid;
     int gid;
     int pid;
     int ppid;
+    char* name;
     char* cmdline;
 
-} pid_info;
+} pid_info_t;
 
-char* join_proc_path(char* pid, char* pid_info) {
+// this is static because its only used in this C file
+// TODO: change is function based on CR
+static char* join_proc_path(char* pid, char* pid_info) {
     char* full_path = NULL;
     full_path = malloc(strlen(PROC_PATH) + strlen(pid) + strlen(pid_info) + 2);
     if (full_path == NULL) {
@@ -42,7 +50,7 @@ char* join_proc_path(char* pid, char* pid_info) {
 }
 
 
-int parse_cmdline(char* cmdline_path, pid_info* info) {
+int parse_cmdline(const char* cmdline_path, pid_info_t* info) {
     FILE* fp = NULL;
     char* cmdline_data = NULL;
     int r_bytes = 0;
@@ -56,32 +64,31 @@ int parse_cmdline(char* cmdline_path, pid_info* info) {
     
     r_bytes = fread(cmdline_data, 1, MID_BUF_SIZE, fp);
 
+    // cmdline is separated by NULL bytes, change to valid string
     for (int i = 0; i < r_bytes; i++) {
         if (cmdline_data[i] == '\0') {
             cmdline_data[i] = ' ';
         }
     }
-    if (info->cmdline != NULL) {
-        free(info->cmdline);
-        info->cmdline = cmdline_data;
-    }
+
+    info->cmdline = cmdline_data;
     return 0;
 }
 
-int parse_stat(char* stat_path, pid_info* info) {
-    FILE* fp;
+int parse_stat(char* stat_path, pid_info_t* info) {
+    FILE* fp = NULL;
 
     fp = fopen(stat_path, READ_FLAG);
     if (fp == NULL) {
         return -1;
     }
 
-    fscanf(fp, "%d %ms %*c %d %d", &info->pid, &info->cmdline, &info->ppid, &info->gid);
+    fscanf(fp, "%d %ms %*c %d %d", &info->pid, &info->name, &info->ppid, &info->gid);
     fclose(fp);
     return 0;
 }
 
-int parse_status(char* stat_path, pid_info* info) { 
+int parse_status(char* stat_path, pid_info_t* info) { 
     FILE* fp;
     char* status_data = NULL;
     int r_bytes = 0;
@@ -107,14 +114,14 @@ int parse_status(char* stat_path, pid_info* info) {
     return 0;
 }
 
-pid_info* parse_pid(char* pid) {
-    pid_info* info = NULL; 
+pid_info_t* parse_pid(char* pid) {
+    pid_info_t* info = NULL; 
     int ret_status = 0;
     char* stat_path = NULL;
     char* status_path = NULL;
     char* cmdline_path = NULL;
 
-    info = (pid_info*)malloc(sizeof(pid_info));
+    info = (pid_info_t*)malloc(sizeof(pid_info_t));
     if (info == NULL) {
         printf("something went wrong\n");
     }
@@ -145,21 +152,16 @@ pid_info* parse_pid(char* pid) {
     return info;
 }
 
-bool is_pid(char* proc_ent_name) {
-
-    return (atoi(proc_ent_name) != 0);
-}
-
 void print_pid(void* info) {
 
-    pid_info* i = (pid_info*)info;
-    printf("%-10d %-10d %-10d %-10d %s\n", i->euid, i->pid, i->ppid, i->gid, i->cmdline);
+    pid_info_t* i = (pid_info_t*)info;
+    printf("%-10d %-10d %-10d %-10d %s %s\n", i->euid, i->pid, i->ppid, i->gid, i->name, i->cmdline);
 
 }
 
 void print_pids(struct Node** pids) {
 
-    printf("%-10s %-10s %-10s %-10s %-10s\n", "EUID", "PID", "PPID", "GID", "CMD");
+    printf("%-10s %-10s %-10s %-10s %-10s %-10s\n", "EUID", "PID", "PPID", "GID", "NAME", "CMD");
     list_print(pids, print_pid);
 }
 
@@ -167,7 +169,7 @@ int main() {
     
     struct dirent* proc_ent = NULL;
     DIR* proc_dir = NULL;
-    pid_info* info = NULL;
+    pid_info_t* info = NULL;
     struct Node** pid_list = list_init(NULL);
 
     proc_dir = opendir(PROC_PATH);
@@ -178,7 +180,7 @@ int main() {
     
     proc_ent = readdir(proc_dir);
     while (proc_ent != NULL) {
-       if (is_pid(proc_ent->d_name)) {
+       if (IS_PID(proc_ent->d_name)) {
             info = parse_pid(proc_ent->d_name);
             list_push(pid_list, (void*)info);
         }
