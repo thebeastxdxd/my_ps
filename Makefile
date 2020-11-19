@@ -1,14 +1,14 @@
 # CC is a standard variable in Makefiles for the compiler used
 CC = gcc
 # OBJ variable is used to store all of the intermidate OBJs files we want
-OBJ = main.o linked_list.o
+OBJ = main.o 
 # add header files as dependencies so that when they are changed we recompile
-DEPS = main.h linked_list.h
+DEPS = error.h
 
-OUT_EX = my_ps
+TARGET = my_ps
 
 # PHONY allows me to create a make rule that the rule's target is not actually a file
-.PHONY: clean 
+.PHONY: clean, run
 
 # rule for compiling all c files to objs
 # the $@ is an automatic variable which is replaced with the target name
@@ -18,9 +18,12 @@ OUT_EX = my_ps
 
 # rule for our executable
 # the $^ is an automatic variable which is replaced with the list of dependencies
-run: $(OBJ)
-	$(CC) -o $(OUT_EX) $^
+TARGET: $(OBJ)
+	$(CC) -o $(TARGET) $^
+
+run: 
+	./$(TARGET)	
 
 
 clean:
-	rm -f $(OBJ) $(OUT_EX)
+	rm -f $(OBJ) $(TARGET)
