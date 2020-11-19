@@ -4,7 +4,6 @@
 #include <dirent.h>
 #include <linux/limits.h>
 #include "error.h"
-#include "linked_list.h"
 
 #define BUF_SIZE (4096)
 #define MAX_NAME_LEN (256)
@@ -12,6 +11,8 @@
 #define STATUS   ("status")
 #define CMDLINE  ("cmdline")
 #define UID_SUBS ("Uid:")
+#define NAME_SUBS ("Name:")
+
 #define IS_PID(proc_ent_name) (atoi(proc_ent_name) != 0)
 
 // TODO:stuff left to do
@@ -37,11 +38,10 @@ typedef struct {
 } pid_info_t;
 
 // this is static because its only used in this C file
-// TODO: change is function based on CR
-static error_status_t join_proc_path(char* path, char* pid, char* pid_info) {
+static error_status_t join_proc_path(char* path, const char* pid, const char* pid_info) {
     error_status_t ret_status = SUCCESS_STATUS;
-    CHECK(snprintf(path, PATH_MAX, PROC_FORMAT,  pid, pid_info) < 0)
-
+    CHECK(snprintf(path, PATH_MAX, PROC_FORMAT,  pid, pid_info) > 0)
+    
 cleanup:
     return  ret_status;
 }
@@ -61,7 +61,7 @@ error_status_t parse_cmdline(pid_info_t* info, const char* cmdline_path) {
     //TODO: define the 1
     r_bytes = fread(&info->cmdline, 1, BUF_SIZE, fp);
     //TODO: figure out how to check fread's return value
-    printf("%s\n", info->cmdline); 
+
     // cmdline is separated by NULL bytes, change to valid string
     for (int i = 0; i < r_bytes; i++) {
         if (info->cmdline[i] == '\0') {
@@ -83,9 +83,9 @@ error_status_t parse_stat(pid_info_t* info, const char* stat_path) {
     fp = fopen(stat_path, "r");
     CHECK(fp != NULL);
 
-    // check that fscanf read the correct amount of fields
-    CHECK_ERR(fscanf(fp, "%d %s %*c %d %d", &info->pid, info->name, &info->ppid, &info->gid) == 4,
-            GENERIC_FAILED_STATUS);
+    // TODO: check return value correctly
+    // TODO: make name size in fscanf correct
+    CHECK(fscanf(fp, "%d (%256[^)]) %*c %d %d", &info->pid, &info->name, &info->ppid, &info->gid) == 4);
 
     CHECK(fclose(fp) == 0);
 
@@ -99,6 +99,7 @@ error_status_t parse_status(pid_info_t* info, const char* stat_path) {
     FILE* fp = NULL;
     char status_data[BUF_SIZE] = {0};
     char* uid_index = NULL;
+    char* name_index = NULL;
 
     CHECK(info != NULL);
     CHECK(stat_path != NULL);
@@ -113,8 +114,8 @@ error_status_t parse_status(pid_info_t* info, const char* stat_path) {
     uid_index = strstr(status_data, UID_SUBS); 
     CHECK(uid_index != NULL);
 
-    // check that sscanf parsed the correct amount of fields
-    CHECK(sscanf(uid_index, "%*s\t%d\t%d\t%*d\t%*d\n", &info->ruid, &info->euid) == 2);
+    // TODO: check return value of sscanf
+    sscanf(uid_index, "%*s\t%d\t%d\t%*d\t%*d\n", &info->ruid, &info->euid);
 
 cleanup:
     return ret_status;
@@ -130,15 +131,13 @@ error_status_t parse_pid(pid_info_t* info, char* pid) {
     CHECK(pid != NULL);
 
     join_proc_path(stat_path, pid, STAT); 
-    CHECK_ERR(parse_stat(info, stat_path), GENERIC_FAILED_STATUS);
+    CHECK(parse_stat(info, stat_path) == SUCCESS_STATUS);
     
     join_proc_path(status_path, pid, STATUS);
-    CHECK_ERR(parse_status(info, status_path), GENERIC_FAILED_STATUS);
+    CHECK(parse_status(info, status_path) == SUCCESS_STATUS);
 
-    
     join_proc_path(cmdline_path, pid, CMDLINE);
-    printf("parsing %s for %s\n", cmdline_path, pid);
-    CHECK_ERR(parse_cmdline(info, cmdline_path), GENERIC_FAILED_STATUS);
+    CHECK(parse_cmdline(info, cmdline_path) == SUCCESS_STATUS);
 
 cleanup:
    return ret_status;
@@ -182,7 +181,6 @@ int main() {
             //TODO: check return value
             print_pid(&info);
         }
-        //TODO: clean info 
         proc_ent = readdir(proc_dir);
     }
 
