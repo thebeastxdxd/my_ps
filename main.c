@@ -5,26 +5,20 @@
 #include <linux/limits.h>
 #include "error.h"
 
+#define _STR(x) #x
+#define STR(x) _STR(x)
+
 #define BUF_SIZE (4096)
-#define MAX_NAME_LEN (256)
+#define MAX_NAME_LEN 256
 #define STAT     ("stat")
 #define STATUS   ("status")
 #define CMDLINE  ("cmdline")
 #define UID_SUBS ("Uid:")
-#define NAME_SUBS ("Name:")
-
-#define IS_PID(proc_ent_name) (atoi(proc_ent_name) != 0)
-
-// TODO:stuff left to do
-// 1. remove malloc situtation DONE
-// 2. fix join_proc_path DONE
-// 3. fix error code situtation
-// 4. check return value of each function
-// 5. remove linked list from solution? DONE
-// 6. fix spagehtti code with name and cmdline DONE
-
 #define PROC_PATH "/proc"
 #define PROC_FORMAT (PROC_PATH "/%s/%s")
+#define STAT_FORMAT ("%d (%" STR(MAX_NAME_LEN) "[^)]) %*c %d %d")
+
+#define IS_PID(proc_ent_name) (atoi(proc_ent_name) != 0)
 
 typedef struct {
     int ruid;
@@ -58,9 +52,8 @@ error_status_t parse_cmdline(pid_info_t* info, const char* cmdline_path) {
     fp = fopen(cmdline_path, "r");
     CHECK_ERR(fp != NULL, GENERIC_FAILED_STATUS);
     
-    //TODO: define the 1
-    r_bytes = fread(&info->cmdline, 1, BUF_SIZE, fp);
-    //TODO: figure out how to check fread's return value
+    r_bytes = fread(&info->cmdline, sizeof(char), BUF_SIZE, fp);
+    CHECK(ferror(fp) == 0);
 
     // cmdline is separated by NULL bytes, change to valid string
     for (int i = 0; i < r_bytes; i++) {
@@ -83,9 +76,9 @@ error_status_t parse_stat(pid_info_t* info, const char* stat_path) {
     fp = fopen(stat_path, "r");
     CHECK(fp != NULL);
 
-    // TODO: check return value correctly
-    // TODO: make name size in fscanf correct
-    CHECK(fscanf(fp, "%d (%256[^)]) %*c %d %d", &info->pid, &info->name, &info->ppid, &info->gid) == 4);
+    // the cast for name is because scanf wants a char* but we have char[256]
+    // we limit the length of scanf's name in the STAT_FROMAT
+    CHECK(fscanf(fp, STAT_FORMAT, &info->pid, (char*)&info->name, &info->ppid, &info->gid) == 4);
 
     CHECK(fclose(fp) == 0);
 
@@ -107,15 +100,13 @@ error_status_t parse_status(pid_info_t* info, const char* stat_path) {
     fp = fopen(stat_path, "r");
     CHECK(fp != NULL); 
     
-    //TODO: define the 1
-    r_bytes = fread(status_data, 1, BUF_SIZE, fp);
-    //TODO: figure out how to check fread's return value
+    r_bytes = fread(status_data, sizeof(char), BUF_SIZE, fp);
+    CHECK(ferror(fp) == 0);
 
     uid_index = strstr(status_data, UID_SUBS); 
     CHECK(uid_index != NULL);
 
-    // TODO: check return value of sscanf
-    sscanf(uid_index, "%*s\t%d\t%d\t%*d\t%*d\n", &info->ruid, &info->euid);
+    CHECK(sscanf(uid_index, "%*s\t%d\t%d\t%*d\t%*d\n", &info->ruid, &info->euid) == 2);
 
 cleanup:
     return ret_status;
@@ -159,30 +150,34 @@ void print_pid(pid_info_t* info) {
     printf("%-10d %-10d %-10d %-10d %s %s\n", info->euid, info->pid, info->ppid, info->gid, info->name, info->cmdline);
 }
 
-int main() {
-    
+error_status_t my_ps() {
+    error_status_t ret_status = SUCCESS_STATUS; 
     struct dirent* proc_ent = NULL;
     DIR* proc_dir = NULL;
 
     proc_dir = opendir(PROC_PATH);
-    if (proc_dir == NULL) {
-        printf("Cannot open /proc\n");
-        return -1;
-    }
+    CHECK(proc_dir != NULL);
     
+    // should i set errno before this?
+    // errno = 0;
     proc_ent = readdir(proc_dir);
-    //TODO: check return value
+    CHECK(proc_ent != NULL);
     
     printf("%-10s %-10s %-10s %-10s %-10s %-10s\n", "EUID", "PID", "PPID", "GID", "NAME", "CMD");
     while (proc_ent != NULL) {
         pid_info_t info = {0};
         if (IS_PID(proc_ent->d_name)) {
-            parse_pid(&info, proc_ent->d_name);
-            //TODO: check return value
+            CHECK(parse_pid(&info, proc_ent->d_name) == SUCCESS_STATUS);
             print_pid(&info);
         }
         proc_ent = readdir(proc_dir);
     }
 
-    return 0;
+cleanup:
+    return ret_status;
+
+}
+int main() {
+  
+    my_ps();
 }
