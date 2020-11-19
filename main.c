@@ -1,190 +1,183 @@
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <stdlib.h>
-#include <stdbool.h>
-#include <unistd.h>
 #include <stdio.h>
-#include <errno.h>
 #include <string.h>
 #include <dirent.h>
-#include "linked_list.h"
+#include <linux/limits.h>
+#include "error.h"
 
-#define MIN_BUF_SIZE 256
-#define MID_BUF_SIZE 4096
-#define STAT     "stat"
-#define STATUS   "status"
-#define CMDLINE  "cmdline"
-#define UID_SUBS "Uid:"
-#define READ_FLAG "r"
+#define _STR(x) #x
+#define STR(x) _STR(x)
 
-const char* PROC_PATH = "/proc";
+#define BUF_SIZE (4096)
+#define MAX_NAME_LEN 256
+#define STAT     ("stat")
+#define STATUS   ("status")
+#define CMDLINE  ("cmdline")
+#define UID_SUBS ("Uid:")
+#define PROC_PATH "/proc"
+#define PROC_FORMAT (PROC_PATH "/%s/%s")
+#define STAT_FORMAT ("%d (%" STR(MAX_NAME_LEN) "[^)]) %*c %d %d")
 
-typedef struct _pid_info {
+#define IS_PID(proc_ent_name) (atoi(proc_ent_name) != 0)
+
+typedef struct {
     int ruid;
     int euid;
     int gid;
     int pid;
     int ppid;
-    char* cmdline;
+    char name[MAX_NAME_LEN];
+    char cmdline[PATH_MAX];
 
-} pid_info;
+} pid_info_t;
 
-char* join_proc_path(char* pid, char* pid_info) {
-    char* full_path = NULL;
-    full_path = malloc(strlen(PROC_PATH) + strlen(pid) + strlen(pid_info) + 2);
-    if (full_path == NULL) {
-        return NULL;
-    }
-
-    sprintf(full_path, "%s/%s/%s", PROC_PATH, pid, pid_info); 
-    return full_path;
+// this is static because its only used in this C file
+static error_status_t join_proc_path(char* path, const char* pid, const char* pid_info) {
+    error_status_t ret_status = SUCCESS_STATUS;
+    CHECK(snprintf(path, PATH_MAX, PROC_FORMAT,  pid, pid_info) > 0)
+    
+cleanup:
+    return  ret_status;
 }
 
 
-int parse_cmdline(char* cmdline_path, pid_info* info) {
+error_status_t parse_cmdline(pid_info_t* info, const char* cmdline_path) {
+    error_status_t ret_status = SUCCESS_STATUS;
     FILE* fp = NULL;
-    char* cmdline_data = NULL;
     int r_bytes = 0;
 
-    fp = fopen(cmdline_path, READ_FLAG);
-    
-    cmdline_data = (char*)malloc(MID_BUF_SIZE);
-    if (cmdline_data == NULL) {
-        return -1;
-    }
-    
-    r_bytes = fread(cmdline_data, 1, MID_BUF_SIZE, fp);
+    CHECK(info != NULL);
+    CHECK(cmdline_path != NULL);
 
+    fp = fopen(cmdline_path, "r");
+    CHECK_ERR(fp != NULL, GENERIC_FAILED_STATUS);
+    
+    r_bytes = fread(&info->cmdline, sizeof(char), BUF_SIZE, fp);
+    CHECK(ferror(fp) == 0);
+
+    // cmdline is separated by NULL bytes, change to valid string
     for (int i = 0; i < r_bytes; i++) {
-        if (cmdline_data[i] == '\0') {
-            cmdline_data[i] = ' ';
+        if (info->cmdline[i] == '\0') {
+            info->cmdline[i] = ' ';
         }
     }
-    if (info->cmdline != NULL) {
-        free(info->cmdline);
-        info->cmdline = cmdline_data;
-    }
-    return 0;
+
+cleanup:
+    return ret_status;
 }
 
-int parse_stat(char* stat_path, pid_info* info) {
-    FILE* fp;
-
-    fp = fopen(stat_path, READ_FLAG);
-    if (fp == NULL) {
-        return -1;
-    }
-
-    fscanf(fp, "%d %ms %*c %d %d", &info->pid, &info->cmdline, &info->ppid, &info->gid);
-    fclose(fp);
-    return 0;
-}
-
-int parse_status(char* stat_path, pid_info* info) { 
-    FILE* fp;
-    char* status_data = NULL;
-    int r_bytes = 0;
-    char* uid_index = NULL;
-
-    fp = fopen(stat_path, READ_FLAG);
-    if (fp == NULL) {
-        return -1;
-    }
+error_status_t parse_stat(pid_info_t* info, const char* stat_path) {
+    error_status_t ret_status = SUCCESS_STATUS;
+    FILE* fp = NULL;
     
-    status_data = (char*)malloc(MID_BUF_SIZE);
-    if (status_data == NULL) {
-        return -1;
-    }
-    r_bytes = fread(status_data, 1, MID_BUF_SIZE, fp);
+    CHECK(info != NULL);
+    CHECK(stat_path != NULL);
+
+    fp = fopen(stat_path, "r");
+    CHECK(fp != NULL);
+
+    // the cast for name is because scanf wants a char* but we have char[256]
+    // we limit the length of scanf's name in the STAT_FROMAT
+    CHECK(fscanf(fp, STAT_FORMAT, &info->pid, (char*)&info->name, &info->ppid, &info->gid) == 4);
+
+    CHECK(fclose(fp) == 0);
+
+cleanup:
+    return ret_status;
+}
+
+error_status_t parse_status(pid_info_t* info, const char* stat_path) { 
+    error_status_t ret_status = SUCCESS_STATUS;
+    int r_bytes = 0;
+    FILE* fp = NULL;
+    char status_data[BUF_SIZE] = {0};
+    char* uid_index = NULL;
+    char* name_index = NULL;
+
+    CHECK(info != NULL);
+    CHECK(stat_path != NULL);
+
+    fp = fopen(stat_path, "r");
+    CHECK(fp != NULL); 
+    
+    r_bytes = fread(status_data, sizeof(char), BUF_SIZE, fp);
+    CHECK(ferror(fp) == 0);
 
     uid_index = strstr(status_data, UID_SUBS); 
-    if (uid_index == NULL) {
-        return -1;
-    }
-    sscanf(uid_index, "%*s\t%d\t%d\t%*d\t%*d\n", &info->ruid, &info->euid);
+    CHECK(uid_index != NULL);
 
-    return 0;
+    CHECK(sscanf(uid_index, "%*s\t%d\t%d\t%*d\t%*d\n", &info->ruid, &info->euid) == 2);
+
+cleanup:
+    return ret_status;
 }
 
-pid_info* parse_pid(char* pid) {
-    pid_info* info = NULL; 
-    int ret_status = 0;
-    char* stat_path = NULL;
-    char* status_path = NULL;
-    char* cmdline_path = NULL;
+error_status_t parse_pid(pid_info_t* info, char* pid) {
 
-    info = (pid_info*)malloc(sizeof(pid_info));
-    if (info == NULL) {
-        printf("something went wrong\n");
-    }
+    error_status_t ret_status = SUCCESS_STATUS;
+    char stat_path[PATH_MAX] = {0};
+    char status_path[PATH_MAX] = {0};
+    char cmdline_path[PATH_MAX] = {0};
+    CHECK(info != NULL);
+    CHECK(pid != NULL);
 
-    stat_path = join_proc_path(pid, STAT); 
-    ret_status = parse_stat(stat_path, info);
-    if (ret_status != 0) {
-        printf("something went wrong\n");
-
-    }
-
-    status_path = join_proc_path(pid, STATUS);
-    ret_status = parse_status(status_path, info);
-    if (ret_status != 0) {
-        printf("something went wrong\n");
-    }
-
-    cmdline_path = join_proc_path(pid, CMDLINE);
-    ret_status = parse_cmdline(cmdline_path, info);
-    if (ret_status != 0) {
-        printf("something went wrong\n");
-    }
+    join_proc_path(stat_path, pid, STAT); 
+    CHECK(parse_stat(info, stat_path) == SUCCESS_STATUS);
     
+    join_proc_path(status_path, pid, STATUS);
+    CHECK(parse_status(info, status_path) == SUCCESS_STATUS);
 
-    free(cmdline_path);
-    free(status_path);
-    free(stat_path);
-    return info;
+    join_proc_path(cmdline_path, pid, CMDLINE);
+    CHECK(parse_cmdline(info, cmdline_path) == SUCCESS_STATUS);
+
+cleanup:
+   return ret_status;
 }
 
-bool is_pid(char* proc_ent_name) {
-
-    return (atoi(proc_ent_name) != 0);
-}
-
+/*
 void print_pid(void* info) {
 
-    pid_info* i = (pid_info*)info;
-    printf("%-10d %-10d %-10d %-10d %s\n", i->euid, i->pid, i->ppid, i->gid, i->cmdline);
+    pid_info_t* i = (pid_info_t*)info;
+    printf("%-10d %-10d %-10d %-10d %s %s\n", i->euid, i->pid, i->ppid, i->gid, i->name, i->cmdline);
 
 }
-
 void print_pids(struct Node** pids) {
 
-    printf("%-10s %-10s %-10s %-10s %-10s\n", "EUID", "PID", "PPID", "GID", "CMD");
     list_print(pids, print_pid);
 }
+*/
+void print_pid(pid_info_t* info) {
+    printf("%-10d %-10d %-10d %-10d %s %s\n", info->euid, info->pid, info->ppid, info->gid, info->name, info->cmdline);
+}
 
-int main() {
-    
+error_status_t my_ps() {
+    error_status_t ret_status = SUCCESS_STATUS; 
     struct dirent* proc_ent = NULL;
     DIR* proc_dir = NULL;
-    pid_info* info = NULL;
-    struct Node** pid_list = list_init(NULL);
 
     proc_dir = opendir(PROC_PATH);
-    if (proc_dir == NULL) {
-        printf("Cannot open /proc\n");
-        return -1;
-    }
+    CHECK(proc_dir != NULL);
     
+    // should i set errno before this?
+    // errno = 0;
     proc_ent = readdir(proc_dir);
+    CHECK(proc_ent != NULL);
+    
+    printf("%-10s %-10s %-10s %-10s %-10s %-10s\n", "EUID", "PID", "PPID", "GID", "NAME", "CMD");
     while (proc_ent != NULL) {
-       if (is_pid(proc_ent->d_name)) {
-            info = parse_pid(proc_ent->d_name);
-            list_push(pid_list, (void*)info);
+        pid_info_t info = {0};
+        if (IS_PID(proc_ent->d_name)) {
+            CHECK(parse_pid(&info, proc_ent->d_name) == SUCCESS_STATUS);
+            print_pid(&info);
         }
-
         proc_ent = readdir(proc_dir);
     }
-    print_pids(pid_list);
-    list_free(pid_list);
+
+cleanup:
+    return ret_status;
+
+}
+int main() {
+  
+    my_ps();
 }
