@@ -33,16 +33,20 @@ typedef struct {
 
 // this is static because its only used in this C file
 static error_status_t join_proc_path(char* path, const char* pid, const char* pid_info) {
-    error_status_t ret_status = SUCCESS_STATUS;
-    CHECK(snprintf(path, PATH_MAX, PROC_FORMAT,  pid, pid_info) > 0)
-    
+    error_status_t ret_status = STATUS_SUCCESS;
+    int r_bytes = -1;
+
+    r_bytes = snprintf(path, PATH_MAX, PROC_FORMAT, pid, pid_info);
+    // if the bytes printed were more than the size given the output was truncated.
+    CHECK(r_bytes > 0 && r_bytes < PATH_MAX);
+
 cleanup:
     return  ret_status;
 }
 
 
 error_status_t parse_cmdline(pid_info_t* info, const char* cmdline_path) {
-    error_status_t ret_status = SUCCESS_STATUS;
+    error_status_t ret_status = STATUS_SUCCESS;
     FILE* fp = NULL;
     int r_bytes = 0;
 
@@ -50,8 +54,9 @@ error_status_t parse_cmdline(pid_info_t* info, const char* cmdline_path) {
     CHECK(cmdline_path != NULL);
 
     fp = fopen(cmdline_path, "r");
-    CHECK_ERR(fp != NULL, GENERIC_FAILED_STATUS);
+    CHECK(fp != NULL);
     
+    clearerr(fp);
     r_bytes = fread(&info->cmdline, sizeof(char), BUF_SIZE, fp);
     CHECK(ferror(fp) == 0);
 
@@ -63,11 +68,12 @@ error_status_t parse_cmdline(pid_info_t* info, const char* cmdline_path) {
     }
 
 cleanup:
+    fclose(fp); // Best effort.
     return ret_status;
 }
 
 error_status_t parse_stat(pid_info_t* info, const char* stat_path) {
-    error_status_t ret_status = SUCCESS_STATUS;
+    error_status_t ret_status = STATUS_SUCCESS;
     FILE* fp = NULL;
     
     CHECK(info != NULL);
@@ -78,16 +84,16 @@ error_status_t parse_stat(pid_info_t* info, const char* stat_path) {
 
     // the cast for name is because scanf wants a char* but we have char[256]
     // we limit the length of scanf's name in the STAT_FROMAT
-    CHECK(fscanf(fp, STAT_FORMAT, &info->pid, (char*)&info->name, &info->ppid, &info->gid) == 4);
+    CHECK(fscanf(fp, STAT_FORMAT, &info->pid, info->name, &info->ppid, &info->gid) == 4);
 
-    CHECK(fclose(fp) == 0);
 
 cleanup:
+    fclose(fp); // Best effort.
     return ret_status;
 }
 
 error_status_t parse_status(pid_info_t* info, const char* stat_path) { 
-    error_status_t ret_status = SUCCESS_STATUS;
+    error_status_t ret_status = STATUS_SUCCESS;
     int r_bytes = 0;
     FILE* fp = NULL;
     char status_data[BUF_SIZE] = {0};
@@ -100,6 +106,7 @@ error_status_t parse_status(pid_info_t* info, const char* stat_path) {
     fp = fopen(stat_path, "r");
     CHECK(fp != NULL); 
     
+    clearerr(fp);
     r_bytes = fread(status_data, sizeof(char), BUF_SIZE, fp);
     CHECK(ferror(fp) == 0);
 
@@ -109,26 +116,27 @@ error_status_t parse_status(pid_info_t* info, const char* stat_path) {
     CHECK(sscanf(uid_index, "%*s\t%d\t%d\t%*d\t%*d\n", &info->ruid, &info->euid) == 2);
 
 cleanup:
+    fclose(fp); // Best effort.
     return ret_status;
 }
 
 error_status_t parse_pid(pid_info_t* info, char* pid) {
 
-    error_status_t ret_status = SUCCESS_STATUS;
+    error_status_t ret_status = STATUS_SUCCESS;
     char stat_path[PATH_MAX] = {0};
     char status_path[PATH_MAX] = {0};
     char cmdline_path[PATH_MAX] = {0};
     CHECK(info != NULL);
     CHECK(pid != NULL);
 
-    join_proc_path(stat_path, pid, STAT); 
-    CHECK(parse_stat(info, stat_path) == SUCCESS_STATUS);
+    CHECK_FUNC(join_proc_path(stat_path, pid, STAT));
+    CHECK_FUNC(parse_stat(info, stat_path));
     
-    join_proc_path(status_path, pid, STATUS);
-    CHECK(parse_status(info, status_path) == SUCCESS_STATUS);
+    CHECK_FUNC(join_proc_path(status_path, pid, STATUS));
+    CHECK_FUNC(parse_status(info, status_path));
 
-    join_proc_path(cmdline_path, pid, CMDLINE);
-    CHECK(parse_cmdline(info, cmdline_path) == SUCCESS_STATUS);
+    CHECK_FUNC(join_proc_path(cmdline_path, pid, CMDLINE));
+    CHECK_FUNC(parse_cmdline(info, cmdline_path));
 
 cleanup:
    return ret_status;
@@ -151,15 +159,13 @@ void print_pid(pid_info_t* info) {
 }
 
 error_status_t my_ps() {
-    error_status_t ret_status = SUCCESS_STATUS; 
+    error_status_t ret_status = STATUS_SUCCESS; 
     struct dirent* proc_ent = NULL;
     DIR* proc_dir = NULL;
 
     proc_dir = opendir(PROC_PATH);
     CHECK(proc_dir != NULL);
     
-    // should i set errno before this?
-    // errno = 0;
     proc_ent = readdir(proc_dir);
     CHECK(proc_ent != NULL);
     
@@ -167,7 +173,7 @@ error_status_t my_ps() {
     while (proc_ent != NULL) {
         pid_info_t info = {0};
         if (IS_PID(proc_ent->d_name)) {
-            CHECK(parse_pid(&info, proc_ent->d_name) == SUCCESS_STATUS);
+            CHECK_FUNC(parse_pid(&info, proc_ent->d_name));
             print_pid(&info);
         }
         proc_ent = readdir(proc_dir);

@@ -8,7 +8,7 @@ DEPS = error.h
 TARGET = my_ps
 
 # PHONY allows me to create a make rule that the rule's target is not actually a file
-.PHONY: clean, run
+.PHONY: clean run
 
 # rule for compiling all c files to objs
 # the $@ is an automatic variable which is replaced with the target name
@@ -18,10 +18,10 @@ TARGET = my_ps
 
 # rule for our executable
 # the $^ is an automatic variable which is replaced with the list of dependencies
-TARGET: $(OBJ)
+$(TARGET): $(OBJ)
 	$(CC) -o $(TARGET) $^
-
-run: 
+ 
+run: $(TARGET)
 	./$(TARGET)	
 
 
